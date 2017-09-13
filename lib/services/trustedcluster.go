@@ -124,6 +124,19 @@ type TrustedClusterSpecV2 struct {
 // RoleMap is a list of mappings
 type RoleMap []RoleMapping
 
+// Equals checks if the two role maps are equal.
+func (r RoleMap) Equals(o RoleMap) bool {
+	if len(r) != len(o) {
+		return false
+	}
+	for i := range r {
+		if !r[i].Equals(o[i]) {
+			return false
+		}
+	}
+	return true
+}
+
 // String prints user friendly representation of role mapping
 func (r RoleMap) String() string {
 	directMatch, wildcardMatch, err := r.parse()
@@ -211,6 +224,17 @@ type RoleMapping struct {
 	Remote string `json:"remote"`
 	// Local specifies local roles to map to
 	Local []string `json:"local"`
+}
+
+// Equals checks if the two role mappings are equal.
+func (r RoleMapping) Equals(o RoleMapping) bool {
+	if r.Remote != o.Remote {
+		return false
+	}
+	if !utils.StringSlicesEqual(r.Local, r.Local) {
+		return false
+	}
+	return true
 }
 
 // Check checks validity of all parameters and sets defaults

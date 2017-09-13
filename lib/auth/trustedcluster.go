@@ -28,6 +28,7 @@ import (
 	"github.com/gravitational/teleport/lib"
 	"github.com/gravitational/teleport/lib/httplib"
 	"github.com/gravitational/teleport/lib/services"
+	"github.com/gravitational/teleport/lib/utils"
 
 	"github.com/gravitational/roundtrip"
 	"github.com/gravitational/trace"
@@ -44,11 +45,13 @@ func (a *AuthServer) UpsertTrustedCluster(trustedCluster services.TrustedCluster
 	}
 	enable := trustedCluster.GetEnabled()
 
-	// if the resource exists and we are not changing state, return right away.
-	// note that if the resource exists, the only state change we allow is to
-	// enable/disable it.
-	if exists == true && existingCluster.GetEnabled() == enable {
-		return nil
+	// if the trusted cluster already exists in the backend, make sure it's a
+	// valid state change we are trying to make
+	if exists == true {
+		err := canChangeState(existingCluster, trustedCluster)
+		if err != nil {
+			return trace.Wrap(err)
+		}
 	}
 
 	// change state
@@ -448,12 +451,7 @@ func (a *AuthServer) activateCertAuthority(t services.TrustedCluster) error {
 		return trace.Wrap(err)
 	}
 
-	err = a.ActivateCertAuthority(services.CertAuthID{Type: services.HostCA, DomainName: t.GetName()})
-	if err != nil {
-		return trace.Wrap(err)
-	}
-
-	return nil
+	return trace.Wrap(a.ActivateCertAuthority(services.CertAuthID{Type: services.HostCA, DomainName: t.GetName()}))
 }
 
 // deactivateCertAuthority will deactivate both the user and host certificate
@@ -464,12 +462,7 @@ func (a *AuthServer) deactivateCertAuthority(t services.TrustedCluster) error {
 		return trace.Wrap(err)
 	}
 
-	err = a.DeactivateCertAuthority(services.CertAuthID{Type: services.HostCA, DomainName: t.GetName()})
-	if err != nil {
-		return trace.Wrap(err)
-	}
-
-	return nil
+	return trace.Wrap(a.DeactivateCertAuthority(services.CertAuthID{Type: services.HostCA, DomainName: t.GetName()}))
 }
 
 // createReverseTunnel will create a services.ReverseTunnel givenin the
@@ -479,9 +472,33 @@ func (a *AuthServer) createReverseTunnel(t services.TrustedCluster) error {
 		t.GetName(),
 		[]string{t.GetReverseTunnelAddress()},
 	)
-	err := a.UpsertReverseTunnel(reverseTunnel)
-	if err != nil {
-		return trace.Wrap(err)
+	return trace.Wrap(a.UpsertReverseTunnel(reverseTunnel))
+}
+
+// canChangeState checks if the state change is allowed or not. If not, returns
+// an error explaining the reason.
+func canChangeState(ec services.TrustedCluster, nc services.TrustedCluster) error {
+	if ec.GetToken() != nc.GetToken() {
+		return trace.BadParameter("can not update token for existing trusted cluster")
+	}
+	if ec.GetProxyAddress() != nc.GetProxyAddress() {
+		return trace.BadParameter("can not update proxy address for existing trusted cluster")
+	}
+	if ec.GetReverseTunnelAddress() != nc.GetReverseTunnelAddress() {
+		return trace.BadParameter("can not update proxy address for existing trusted cluster")
+	}
+	if !utils.StringSlicesEqual(ec.GetRoles(), nc.GetRoles()) {
+		return trace.BadParameter("can not update roles for existing trusted cluster")
+	}
+	if !ec.GetRoleMap().Equals(nc.GetRoleMap()) {
+		return trace.BadParameter("can not update role map for existing trusted cluster")
+	}
+
+	if ec.GetEnabled() == nc.GetEnabled() {
+		if nc.GetEnabled() == true {
+			return trace.BadParameter("trusted cluster is already enabled")
+		}
+		return trace.BadParameter("trusted cluster state is already disabled")
 	}
 
 	return nil
